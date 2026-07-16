@@ -1,0 +1,83 @@
+name: Build Attendance Agent (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:          # allow manual trigger from the Actions tab
+
+permissions:
+  contents: write             # needed to create GitHub Releases
+
+jobs:
+  build-windows:
+    name: Build AttendanceAgent.exe
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python ────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Dependencies ──────────────────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # ── 4. Build ─────────────────────────────────────────────────────────
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller build/AttendanceAgent.spec `
+            --distpath dist `
+            --workpath build/work `
+            --noconfirm
+        shell: pwsh
+
+      # ── 5. Verify output ─────────────────────────────────────────────────
+      - name: Verify EXE exists
+        run: |
+          if (!(Test-Path "dist\AttendanceAgent.exe")) {
+            Write-Error "dist\AttendanceAgent.exe not found — build failed"
+            exit 1
+          }
+          $size = (Get-Item "dist\AttendanceAgent.exe").Length / 1MB
+          Write-Output "Build OK  — AttendanceAgent.exe  ($([math]::Round($size,1)) MB)"
+        shell: pwsh
+
+      # ── 6. Upload artifact (every push / manual run) ──────────────────
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AttendanceAgent-windows-${{ github.sha }}
+          path: dist/AttendanceAgent.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      # ── 7. Create GitHub Release (tag pushes only) ────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AttendanceAgent.exe
+          generate_release_notes: true
+          body: |
+            ## Nexus Attendance Agent ${{ github.ref_name }}
+
+            ### Installation
+            1. Download `AttendanceAgent.exe` below.
+            2. Double-click to run.  Windows SmartScreen will warn on first launch
+               because the binary is unsigned — click **More info → Run anyway**.
+            3. The setup wizard will open.  Paste the token from your Nexus dashboard
+               (Settings → Cameras → New Agent) and follow the four steps.
+
+            ### What's new
+            See the commit log below for changes in this release.
