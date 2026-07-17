@@ -15,7 +15,7 @@ import sys
 
 import customtkinter as ctk
 
-from config.store import ConfigStore
+from config.store import ConfigStore, get_machine_fingerprint
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
@@ -46,7 +46,73 @@ class WizardApp(ctk.CTk):
         self._container.pack(fill="both", expand=True, padx=36, pady=36)
 
         self._current_screen = None
-        self._show_token_screen()
+        self._resume()
+
+    # ── Resume logic ───────────────────────────────────────────────────────────
+
+    def _resume(self) -> None:
+        """
+        Decide which screen to open on launch based on the saved config.
+
+        If config.enc decrypts, holds a verified token, and was bound to *this*
+        machine, Step 1 (token verification) is skipped and the wizard resumes
+        at the next unfinished step. Otherwise (no config, corrupted/undecryptable
+        file, or a different machine) Step 1 is shown so the agent re-verifies.
+        """
+        step = self._resume_step()
+
+        if step >= 4:
+            self._show_already_configured()
+        elif step >= 3:
+            self._show_model_screen({})
+        elif step >= 2:
+            self._show_roi_screen({})
+        elif step >= 1:
+            # Token already verified — rebuild the org_info payload from config.
+            self._show_camera_screen(self._org_info_from_config())
+        else:
+            self._show_token_screen()
+
+    def _resume_step(self) -> int:
+        """
+        Return the saved setup_step only when the config is safe to resume:
+          - config.enc decrypts (Fernet key is machine-bound, so a corrupted
+            file or a different machine yields None here),
+          - a verified agent token is present,
+          - the stored machine fingerprint still matches this machine.
+        Any failure returns 0, which forces Step 1 (re-verification).
+        """
+        cfg = ConfigStore().load()
+        if not cfg:
+            return 0
+        if not cfg.get("agent_token"):
+            return 0
+        if cfg.get("machine_fingerprint") != get_machine_fingerprint():
+            return 0
+        try:
+            return int(cfg.get("setup_step", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _org_info_from_config() -> dict:
+        cfg = ConfigStore().load() or {}
+        return {
+            "org_name": cfg.get("org_name", ""),
+            "plan": cfg.get("plan", ""),
+            "camera_limit": cfg.get("camera_limit", 1),
+            "agent_id": cfg.get("agent_id"),
+        }
+
+    def _show_already_configured(self) -> None:
+        self._clear()
+        label = ctk.CTkLabel(
+            self._container,
+            text="Setup complete!\nThe agent will start on next launch.",
+            font=ctk.CTkFont(size=18),
+            justify="center",
+        )
+        label.pack(expand=True)
 
     def _center(self) -> None:
         self.update_idletasks()
@@ -105,27 +171,14 @@ class WizardApp(ctk.CTk):
     def _on_setup_complete(self, model_config: dict) -> None:
         ConfigStore().update({"setup_step": 4, **model_config})
         # TODO: destroy wizard, start system tray + background service
-        self._clear()
-        label = ctk.CTkLabel(
-            self._container,
-            text="Setup complete!\nThe agent will start on next launch.",
-            font=ctk.CTkFont(size=18),
-            justify="center",
-        )
-        label.pack(expand=True)
+        self._show_already_configured()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    store = ConfigStore()
-    cfg = store.load()
-
-    if store.is_setup_complete():
-        # TODO: skip wizard, run service + tray
-        # For now fall through to wizard so setup can be re-run
-        pass
-
+    # WizardApp inspects the saved config and resumes at the correct step
+    # (skipping token verification when a valid, machine-bound config exists).
     app = WizardApp()
     app.mainloop()
 
