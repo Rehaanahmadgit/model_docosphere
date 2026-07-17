@@ -31,8 +31,8 @@ os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
 )
 
-_PREVIEW_MAX_W = 400
-_PREVIEW_MAX_H = 225
+_PREVIEW_MAX_W = 380
+_PREVIEW_MAX_H = 150
 
 
 def _split_credentials(
@@ -113,7 +113,7 @@ class CameraScreen(ctk.CTkFrame):
             text="Enter the RTSP URL of your IP / network camera.",
             font=ctk.CTkFont(size=13),
             text_color="gray",
-        ).pack(anchor="w", padx=2, pady=(0, 12))
+        ).pack(anchor="w", padx=2, pady=(0, 10))
 
         # ── RTSP URL ───────────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -172,7 +172,30 @@ class CameraScreen(ctk.CTkFrame):
         )
         self._status.pack(anchor="w", padx=2, pady=(6, 4))
 
+        # ── Bottom navigation bar ───────────────────────────────────────────
+        # Packed (side="bottom") BEFORE the preview so it reserves its space
+        # first. In Tk's pack geometry a widget only gets a parcel if cavity
+        # still remains when it is packed; by claiming the bottom before the
+        # (large) preview is packed, the preview clips when the window is short
+        # instead of the Next button being pushed off-screen — which was the
+        # root cause of the "no Next button" bug. The bar stays empty until a
+        # successful test packs the Next button into it.
+        self._nav = ctk.CTkFrame(self, fg_color="transparent")
+        self._nav.pack(side="bottom", fill="x", pady=(8, 0))
+
+        self._next_btn = ctk.CTkButton(
+            self._nav,
+            text="Next  →",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            width=430,
+            height=44,
+            command=self._on_next,
+        )
+        # Not packed into the bar yet — revealed only after a successful test.
+
         # ── Preview area ───────────────────────────────────────────────────
+        # Packed last (side="top") so it fills the gap between the fields and
+        # the reserved nav bar, and yields space to Next when room is tight.
         self._preview = ctk.CTkLabel(
             self,
             text="No preview yet",
@@ -182,19 +205,15 @@ class CameraScreen(ctk.CTkFrame):
             text_color="gray",
             corner_radius=8,
         )
-        self._preview.pack(anchor="w", padx=2, pady=(0, 10))
+        self._preview.pack(side="top", anchor="w", padx=2, pady=(0, 4))
 
-        # ── Next (locked until a successful test) ──────────────────────────
-        self._next_btn = ctk.CTkButton(
-            self,
-            text="Next  →",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            width=430,
-            height=44,
-            state="disabled",
-            command=self._on_next,
-        )
+    def _reveal_next(self) -> None:
+        """Reveal the Next button inside the space-reserved bottom nav bar."""
         self._next_btn.pack(anchor="w", padx=2)
+
+    def _hide_next(self) -> None:
+        """Hide Next again when a new test invalidates the prior success."""
+        self._next_btn.pack_forget()
 
     # ── Test-connection flow ──────────────────────────────────────────────────
 
@@ -216,7 +235,7 @@ class CameraScreen(ctk.CTkFrame):
 
         # A new test invalidates any prior success until it completes.
         self._verified_url = None
-        self._next_btn.configure(state="disabled")
+        self._hide_next()
         self._test_btn.configure(state="disabled", text="Connecting…")
         self._set_status("Opening stream — this can take a few seconds…")
 
@@ -263,10 +282,17 @@ class CameraScreen(ctk.CTkFrame):
         self._verified_user = username
         self._verified_pw = password
 
-        self._render_preview(frame)
-        self._set_status("✓ Camera connected — preview below.", color="#22c55e")
+        # Unlock advancing first — a preview hiccup must never strand the user
+        # on a verified camera with no way forward.
         self._test_btn.configure(state="normal", text="Test Connection")
-        self._next_btn.configure(state="normal")
+        self._reveal_next()
+
+        try:
+            self._render_preview(frame)
+            self._set_status("✓ Camera connected — preview below.", color="#22c55e")
+        except Exception:
+            self._preview.configure(text="Connected — preview unavailable", image=None)
+            self._set_status("✓ Camera connected.", color="#22c55e")
 
     def _on_test_err(self, message: str) -> None:
         self._set_status(f"✗ {message}", error=True)
