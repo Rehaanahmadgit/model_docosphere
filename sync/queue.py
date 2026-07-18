@@ -31,7 +31,7 @@ class EventQueue:
             """
             CREATE TABLE IF NOT EXISTS events (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id      INTEGER NOT NULL,
+                student_id      TEXT    NOT NULL,
                 section_id      INTEGER NOT NULL,
                 subject_id      INTEGER,
                 check_in_at     TEXT    NOT NULL,   -- ISO-8601
@@ -46,7 +46,7 @@ class EventQueue:
 
     def enqueue(
         self,
-        student_id: int,
+        student_id: str,
         section_id: int,
         check_in_at: datetime,
         confidence_score: float,

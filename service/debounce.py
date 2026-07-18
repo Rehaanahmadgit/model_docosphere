@@ -22,9 +22,9 @@ class AttendanceDebounce:
 
     def __init__(self, window_hours: float = 4.0):
         self._window = timedelta(hours=window_hours)
-        self._last_seen: dict[int, datetime] = {}   # student_id → timestamp
+        self._last_seen: dict[str, datetime] = {}   # student_id → timestamp
 
-    def should_record(self, student_id: int) -> bool:
+    def should_record(self, student_id: str) -> bool:
         """Return True if this student should generate a new attendance event."""
         now = datetime.now(timezone.utc)
         last = self._last_seen.get(student_id)
