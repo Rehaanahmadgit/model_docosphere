@@ -186,7 +186,7 @@ class FaceRecognizer:
         return self._match(_l2_normalize(np.asarray(probe, dtype=np.float32)))
 
     def _match(self, probe: np.ndarray) -> Optional[RecognitionResult]:
-        best_id: Optional[int] = None
+        best_id: Optional[str] = None
         best_sim = -1.0
         for student_id, ref in self._gallery.items():
             # Both vectors are unit-normalized, so the dot product is cosine sim.

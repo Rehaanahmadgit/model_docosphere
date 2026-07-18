@@ -1,5 +1,5 @@
 """
-setup_wizard/roi_screen.py — Step 3: ROI (Region of Interest) Selector
+setup_wizard/roi_screen.py — Step 4: ROI (Region of Interest) Selector
 
 Grabs a single frame from the camera configured in Step 2 (the RTSP URL and
 credentials already stored in the encrypted ConfigStore) and lets the admin
@@ -73,7 +73,7 @@ def _roi_fraction_box(
 
 
 class ROIScreen(ctk.CTkFrame):
-    """Step 3 of the setup wizard — draw the detection ROI on a camera frame."""
+    """Step 4 of the setup wizard — draw the detection ROI on a camera frame."""
 
     def __init__(self, master: ctk.CTk, on_success, camera_config: dict):
         super().__init__(master, fg_color="transparent")
@@ -97,7 +97,7 @@ class ROIScreen(ctk.CTkFrame):
     def _build_ui(self) -> None:
         ctk.CTkLabel(
             self,
-            text="Step 3 of 4  —  Detection Zone",
+            text="Step 4 of 5  —  Detection Zone",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).pack(anchor="w", padx=2, pady=(0, 4))
@@ -346,9 +346,9 @@ class ROIScreen(ctk.CTkFrame):
         if not self._roi:
             self._set_status("Draw the detection zone before continuing.", error=True)
             return
-        roi_config = {"roi": self._roi, "setup_step": 3}
+        roi_config = {"roi": self._roi, "setup_step": 4}
         # Merge into the existing encrypted config so main.py's resume logic
-        # picks up setup_step=3 and lands on the model screen on restart.
+        # picks up setup_step=4 and lands on the model screen on restart.
         ConfigStore().update(roi_config)
         self._on_success(roi_config)
 

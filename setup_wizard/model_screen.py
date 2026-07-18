@@ -161,7 +161,7 @@ def _is_valid(path: Path, spec: dict) -> bool:
 
 
 class ModelScreen(ctk.CTkFrame):
-    """Step 4 of the setup wizard — model tier selection and weight download."""
+    """Step 5 of the setup wizard — model tier selection and weight download."""
 
     def __init__(self, master: ctk.CTk, on_success, roi_config: dict):
         super().__init__(master, fg_color="transparent")
@@ -180,7 +180,7 @@ class ModelScreen(ctk.CTkFrame):
     def _build_ui(self) -> None:
         ctk.CTkLabel(
             self,
-            text="Step 4 of 4  —  AI Model",
+            text="Step 5 of 5  —  AI Model",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).pack(anchor="w", padx=2, pady=(0, 4))
@@ -425,7 +425,7 @@ class ModelScreen(ctk.CTkFrame):
         self._downloading = False
         self._progress_bar.set(1.0)
         self._set_status("✓ Models downloaded — finishing setup…", color="#22c55e")
-        # on_success (main._on_setup_complete) merges this, sets setup_step=4,
+        # on_success (main._on_setup_complete) merges this, sets setup_step=5,
         # and completes the wizard.
         self._on_success(model_config)
 

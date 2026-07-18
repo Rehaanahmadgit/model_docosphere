@@ -97,7 +97,7 @@ class CameraScreen(ctk.CTkFrame):
     def _build_ui(self) -> None:
         ctk.CTkLabel(
             self,
-            text="Step 2 of 4  —  Camera Configuration",
+            text="Step 2 of 5  —  Camera Configuration",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).pack(anchor="w", padx=2, pady=(0, 4))
@@ -322,7 +322,7 @@ class CameraScreen(ctk.CTkFrame):
             "setup_step": 2,
         }
         # Merge into the existing (Step 1) encrypted config so resume logic in
-        # main.py picks up setup_step=2 and lands on the ROI screen on restart.
+        # main.py picks up setup_step=2 and lands on the section screen on restart.
         ConfigStore().update(camera_config)
         self._on_success(camera_config)
 

@@ -105,6 +105,22 @@ def sync_embeddings(
     _raise_for(resp)
 
 
+def list_sections(
+    base_url: str,
+    token: str,
+    fingerprint: str,
+) -> list[dict]:
+    """GET /api/agent/sections — org's active sections, for the setup wizard's section picker."""
+    resp = requests.get(
+        f"{base_url}/api/agent/sections",
+        params={"token": token, "machine_fingerprint": fingerprint},
+        timeout=_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        return resp.json().get("sections", [])
+    _raise_for(resp)
+
+
 def push_attendance(
     base_url: str,
     token: str,

@@ -7,7 +7,7 @@ Launch sequence:
   3. If setup is complete → run heartbeat check, then start service + system tray.
 
 The wizard flow:
-  TokenScreen  →  CameraScreen  →  ROIScreen  →  ModelScreen  →  main loop
+  TokenScreen  →  CameraScreen  →  SectionScreen  →  ROIScreen  →  ModelScreen  →  main loop
 """
 from __future__ import annotations
 
@@ -61,12 +61,14 @@ class WizardApp(ctk.CTk):
         """
         step = self._resume_step()
 
-        if step >= 4:
+        if step >= 5:
             self._show_already_configured()
-        elif step >= 3:
+        elif step >= 4:
             self._show_model_screen({})
-        elif step >= 2:
+        elif step >= 3:
             self._show_roi_screen({})
+        elif step >= 2:
+            self._show_section_screen({})
         elif step >= 1:
             # Token already verified — rebuild the org_info payload from config.
             self._show_camera_screen(self._org_info_from_config())
@@ -143,8 +145,18 @@ class WizardApp(ctk.CTk):
         from setup_wizard.camera_screen import CameraScreen
         self._current_screen = CameraScreen(
             self._container,
-            on_success=self._show_roi_screen,
+            on_success=self._show_section_screen,
             org_info=org_info,
+        )
+        self._current_screen.pack(fill="both", expand=True)
+
+    def _show_section_screen(self, camera_config: dict) -> None:
+        self._clear()
+        from setup_wizard.section_screen import SectionScreen
+        self._current_screen = SectionScreen(
+            self._container,
+            on_success=self._show_roi_screen,
+            camera_config=camera_config,
         )
         self._current_screen.pack(fill="both", expand=True)
 
@@ -169,7 +181,7 @@ class WizardApp(ctk.CTk):
         self._current_screen.pack(fill="both", expand=True)
 
     def _on_setup_complete(self, model_config: dict) -> None:
-        ConfigStore().update({"setup_step": 4, **model_config})
+        ConfigStore().update({"setup_step": 5, **model_config})
         # TODO: destroy wizard, start system tray + background service
         self._show_already_configured()
 

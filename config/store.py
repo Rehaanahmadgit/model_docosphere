@@ -84,4 +84,4 @@ class ConfigStore:
     def is_setup_complete(self) -> bool:
         """True only when all wizard steps have been finished."""
         cfg = self.load()
-        return bool(cfg and cfg.get("setup_step", 0) >= 4)
+        return bool(cfg and cfg.get("setup_step", 0) >= 5)

@@ -34,6 +34,7 @@ class EventQueue:
                 student_id      TEXT    NOT NULL,
                 section_id      INTEGER NOT NULL,
                 subject_id      INTEGER,
+                camera_id       TEXT,
                 check_in_at     TEXT    NOT NULL,   -- ISO-8601
                 confidence_score REAL   NOT NULL,
                 status          TEXT    NOT NULL DEFAULT 'pending',
@@ -42,6 +43,12 @@ class EventQueue:
             )
             """
         )
+        # CREATE TABLE IF NOT EXISTS is a no-op against a pre-existing events
+        # table from before camera_id existed — add it here so an already-created
+        # queue.db picks it up without losing whatever's already queued.
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(events)")}
+        if "camera_id" not in cols:
+            self._conn.execute("ALTER TABLE events ADD COLUMN camera_id TEXT")
         self._conn.commit()
 
     def enqueue(
@@ -51,17 +58,19 @@ class EventQueue:
         check_in_at: datetime,
         confidence_score: float,
         subject_id: int | None = None,
+        camera_id: str | None = None,
     ) -> None:
         self._conn.execute(
             """
             INSERT INTO events
-                (student_id, section_id, subject_id, check_in_at, confidence_score, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (student_id, section_id, subject_id, camera_id, check_in_at, confidence_score, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 student_id,
                 section_id,
                 subject_id,
+                camera_id,
                 check_in_at.isoformat(),
                 confidence_score,
                 datetime.now(timezone.utc).isoformat(),
@@ -71,7 +80,7 @@ class EventQueue:
 
     def pending(self, limit: int = 100) -> list[dict]:
         cur = self._conn.execute(
-            "SELECT id, student_id, section_id, subject_id, check_in_at, confidence_score "
+            "SELECT id, student_id, section_id, subject_id, camera_id, check_in_at, confidence_score "
             "FROM events WHERE status='pending' ORDER BY id LIMIT ?",
             (limit,),
         )

@@ -42,7 +42,7 @@ class TokenScreen(ctk.CTkFrame):
         # Step indicator
         ctk.CTkLabel(
             self,
-            text="Step 1 of 4  —  Connect to Server",
+            text="Step 1 of 5  —  Connect to Server",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).pack(anchor="w", padx=2, pady=(0, 6))
