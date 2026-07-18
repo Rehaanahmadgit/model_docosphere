@@ -21,9 +21,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from typing import Optional
 
 import cv2
+
+DEBUG_CAPTURE_PATH = "debug_capture.jpg"
+_RTSP_WARMUP_FRAMES = 8
+_RTSP_COUNTDOWN_SECONDS = 3
 
 from config.store import ConfigStore
 from service.detection import FaceDetector
@@ -57,8 +62,20 @@ def _capture_rtsp_frame(url: str):
     if not cap.isOpened():
         print("✗ Could not open the RTSP stream.")
         return None
+    print("Stream opened.")
     try:
+        # RTSP streams often hand back stale/corrupted frames right after
+        # opening (buffered from before the decoder caught up) — burn a few
+        # before trusting any of them.
+        for _ in range(_RTSP_WARMUP_FRAMES):
+            cap.read()
+
+        for remaining in range(_RTSP_COUNTDOWN_SECONDS, 0, -1):
+            print(f"Capturing in {remaining}...")
+            time.sleep(1)
+
         ok, frame = cap.read()
+        print("Frame captured.")
     finally:
         cap.release()
     if not ok or frame is None:
@@ -109,6 +126,9 @@ def main(argv=None) -> int:
         if frame is None:
             return 2
         print(f"Frame captured from RTSP  ({frame.shape[1]}x{frame.shape[0]})")
+
+    cv2.imwrite(DEBUG_CAPTURE_PATH, frame)
+    print(f"Raw captured frame saved to {DEBUG_CAPTURE_PATH} for inspection.")
 
     detector = FaceDetector(detector_path, confidence_threshold=args.conf, execution_provider=provider)
     try:
