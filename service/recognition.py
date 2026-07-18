@@ -34,7 +34,7 @@ _DEFAULT_SFACE_COSINE_THRESHOLD = 0.363
 
 @dataclass
 class RecognitionResult:
-    student_id: int
+    student_id: str
     confidence: float   # cosine similarity 0.0–1.0
 
 
@@ -68,7 +68,7 @@ class FaceRecognizer:
         self.execution_provider = (execution_provider or "cpu").lower()
         self._recognizer = None
         # student_id → L2-normalized embedding (so cosine sim is a plain dot).
-        self._gallery: Dict[int, np.ndarray] = {}
+        self._gallery: Dict[str, np.ndarray] = {}
 
     def _backend_target(self):
         if self.execution_provider == "cuda":
@@ -99,10 +99,12 @@ class FaceRecognizer:
 
         Accepts either:
           * a dict {student_id: [floats]}, or
-          * a list of {"student_id": int, "embedding": [floats]} dicts
-        Vectors are L2-normalized on load so identify() is a single dot product.
+          * a list of {"student_id": str, "embedding": [floats]} dicts
+        student_id is an opaque string identifier (e.g. "test_student" or an
+        alphanumeric roll number) — never coerced to int. Vectors are
+        L2-normalized on load so identify() is a single dot product.
         """
-        gallery: Dict[int, np.ndarray] = {}
+        gallery: Dict[str, np.ndarray] = {}
 
         if isinstance(embeddings, dict):
             items = embeddings.items()
@@ -118,7 +120,7 @@ class FaceRecognizer:
             arr = _l2_normalize(np.asarray(vector, dtype=np.float32))
             if arr.size == 0:
                 continue
-            gallery[int(student_id)] = arr
+            gallery[str(student_id)] = arr
 
         self._gallery = gallery
 
