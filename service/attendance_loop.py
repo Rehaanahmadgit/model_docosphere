@@ -28,6 +28,7 @@ from config.store import ConfigStore
 from service.debounce import AttendanceDebounce
 from service.detection import FaceDetector
 from service.recognition import FaceRecognizer
+from sync.embeddings_cache import read_cache as _read_embeddings_cache, refresh_gallery
 from sync.queue import EventQueue
 
 _DEFAULT_SAMPLE_FPS = 3.0
@@ -38,21 +39,19 @@ _RECONNECT_BACKOFF_MAX = 30.0
 
 def load_local_gallery() -> dict:
     """
-    Interface stub for the local embeddings cache.
+    Read the local embeddings cache (sync/embeddings_cache.py), written by the
+    most recent successful sync of GET /api/agent/sync-embeddings.
 
-    Step 4's sync-embeddings flow will eventually fetch each student's
-    reference embedding from the backend and cache it locally; this is the
-    read side of that cache. Until that flow is built, there is nothing to
-    read, so this returns an empty gallery — recognition then runs with 0
-    students enrolled (every detected face reports "no match", nothing gets
-    enqueued). Swap the body for a real read (e.g. from a cache file written
-    by sync/) once that flow lands.
+    Pure read — does not talk to the network. AttendanceLoop.start() calls
+    refresh_gallery() first to update the cache, then this to load it; call
+    this on its own if you just want whatever was last synced.
 
     Returns:
         {student_id: [floats]} — same shape FaceRecognizer.load_gallery() and
-        generate_test_gallery.py's gallery.json already accept.
+        generate_test_gallery.py's gallery.json already accept. {} if nothing
+        has ever synced successfully.
     """
-    return {}
+    return _read_embeddings_cache()
 
 
 def _resolve_rtsp_url(cfg: dict) -> Optional[str]:
@@ -125,6 +124,9 @@ class AttendanceLoop:
 
         self._detector.load()
         self._recognizer.load()
+        # Pull the latest embeddings at startup; falls back to whatever's
+        # already cached if the backend is unreachable (never raises).
+        refresh_gallery()
         gallery = load_local_gallery()
         if gallery:
             self._recognizer.load_gallery(gallery)

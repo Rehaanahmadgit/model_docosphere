@@ -6,8 +6,6 @@ detail message on non-200 responses so the UI can display it directly.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 
 AGENT_VERSION = "1.0.0"
@@ -84,20 +82,16 @@ def sync_embeddings(
     base_url: str,
     token: str,
     fingerprint: str,
-    section_ids: list[int],
-    since: Optional[str] = None,
 ) -> list[dict]:
-    """GET /api/agent/sync-embeddings — pull face embeddings for given sections."""
-    params: dict = {
-        "token": token,
-        "machine_fingerprint": fingerprint,
-        "section_ids": ",".join(str(s) for s in section_ids),
-    }
-    if since:
-        params["since"] = since
+    """
+    GET /api/agent/sync-embeddings — org-wide face embeddings, as
+    [{student_id, embedding: [float, ...]}, ...]. The backend sync is
+    org-wide (not filtered by section), so unlike the old signature this
+    takes no section_ids/since — same minimal pattern as list_sections().
+    """
     resp = requests.get(
         f"{base_url}/api/agent/sync-embeddings",
-        params=params,
+        params={"token": token, "machine_fingerprint": fingerprint},
         timeout=_TIMEOUT,
     )
     if resp.status_code == 200:
