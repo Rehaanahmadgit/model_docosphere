@@ -5,3 +5,7 @@ requests>=2.31.0
 cryptography>=42.0.0
 websockets>=12.0
 Pillow>=10.2.0
+# DirectML build: ships the CPU provider plus DmlExecutionProvider, so the
+# model screen can detect GPU acceleration on any DirectX 12 GPU (NVIDIA/AMD/
+# Intel) on the Windows target. Also used later for ONNX inference.
+onnxruntime-directml>=1.17.0
