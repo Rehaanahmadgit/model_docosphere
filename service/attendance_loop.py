@@ -36,6 +36,7 @@ from config.store import ConfigStore
 from service.debounce import AttendanceDebounce
 from service.detection import FaceDetector
 from service.recognition import FaceRecognizer
+from service.snapshots import cleanup_old_snapshots, save_snapshot_if_needed
 from sync.embeddings_cache import read_cache as _read_embeddings_cache, refresh_gallery
 from sync.queue import EventQueue
 
@@ -43,6 +44,7 @@ _DEFAULT_SAMPLE_FPS = 3.0
 _DEFAULT_SESSION_WINDOW_HOURS = 4.0
 _RECONNECT_BACKOFF_START = 1.0
 _RECONNECT_BACKOFF_MAX = 30.0
+_SNAPSHOT_CLEANUP_INTERVAL_HOURS = 6.0
 
 
 def load_local_gallery() -> dict:
@@ -132,6 +134,7 @@ class AttendanceLoop:
 
         self._detector.load()
         self._recognizer.load()
+        cleanup_old_snapshots()
         # Pull the latest embeddings at startup; falls back to whatever's
         # already cached if the backend is unreachable (never raises).
         refresh_gallery()
@@ -162,6 +165,7 @@ class AttendanceLoop:
         backoff = _RECONNECT_BACKOFF_START
         cap = None
         next_due = 0.0
+        next_snapshot_cleanup = time.monotonic() + _SNAPSHOT_CLEANUP_INTERVAL_HOURS * 3600
 
         try:
             while self._running:
@@ -192,6 +196,10 @@ class AttendanceLoop:
                     continue
 
                 now = time.monotonic()
+                if now >= next_snapshot_cleanup:
+                    cleanup_old_snapshots()
+                    next_snapshot_cleanup = now + _SNAPSHOT_CLEANUP_INTERVAL_HOURS * 3600
+
                 if now < next_due:
                     continue
                 next_due = now + interval
@@ -233,7 +241,14 @@ class AttendanceLoop:
             print(f"✓ Match: student_id={match.student_id} similarity={match.confidence:.3f}")
             if not self._debounce.should_record(match.student_id):
                 continue
+            self._save_snapshot(match.student_id, frame)
             self._enqueue_event(match.student_id, match.confidence)
+
+    def _save_snapshot(self, student_id: str, frame) -> None:
+        try:
+            save_snapshot_if_needed(student_id, frame)
+        except Exception as exc:
+            print(f"! Failed to save snapshot for student_id={student_id}: {exc}")
 
     def _enqueue_event(self, student_id: str, confidence: float) -> None:
         try:
