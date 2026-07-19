@@ -25,13 +25,6 @@ from typing import Callable, Optional
 
 import cv2
 
-# FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
-# and cap the socket timeout so a wrong/unreachable host fails fast instead of
-# hanging indefinitely. stimeout is in microseconds.
-os.environ.setdefault(
-    "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
-)
-
 from config.store import ConfigStore
 from service.debounce import AttendanceDebounce
 from service.detection import FaceDetector
@@ -45,6 +38,14 @@ _DEFAULT_SESSION_WINDOW_HOURS = 4.0
 _RECONNECT_BACKOFF_START = 1.0
 _RECONNECT_BACKOFF_MAX = 30.0
 _SNAPSHOT_CLEANUP_INTERVAL_HOURS = 6.0
+
+# FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
+# and cap the socket timeout so a wrong/unreachable host fails fast instead of
+# hanging indefinitely. stimeout is in microseconds. Set immediately before
+# the cv2.VideoCapture(...) call that needs it (not at module level) — the
+# FFmpeg backend reads this env var lazily, so setting it at import time races
+# against whichever module happens to import cv2 first.
+_RTSP_FFMPEG_OPTS = "rtsp_transport;tcp|stimeout;5000000"
 
 
 def load_local_gallery() -> dict:
@@ -170,11 +171,9 @@ class AttendanceLoop:
         try:
             while self._running:
                 if cap is None:
-                    print(
-                        f"Opening RTSP stream with transport="
-                        f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
-                    )
+                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _RTSP_FFMPEG_OPTS
                     cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
+                    print(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
                     if not cap.isOpened():
                         print(f"✗ Could not open the RTSP stream; retrying in {backoff:.1f}s")
                         cap.release()

@@ -33,10 +33,11 @@ _RTSP_COUNTDOWN_SECONDS = 3
 
 # FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
 # and cap the socket timeout so a wrong/unreachable host fails fast instead of
-# hanging indefinitely. stimeout is in microseconds.
-os.environ.setdefault(
-    "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
-)
+# hanging indefinitely. stimeout is in microseconds. Set immediately before
+# the cv2.VideoCapture(...) call that needs it (not at module level) — the
+# FFmpeg backend reads this env var lazily, so setting it at import time races
+# against whichever module happens to import cv2 first.
+_RTSP_FFMPEG_OPTS = "rtsp_transport;tcp|stimeout;5000000"
 
 from config.store import ConfigStore
 from service.detection import FaceDetector
@@ -66,11 +67,9 @@ def _resolve_rtsp_url(cfg: dict) -> Optional[str]:
 
 
 def _capture_rtsp_frame(url: str):
-    print(
-        f"Opening RTSP stream with transport="
-        f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
-    )
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _RTSP_FFMPEG_OPTS
     cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+    print(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
     if not cap.isOpened():
         print("✗ Could not open the RTSP stream.")
         return None

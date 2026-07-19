@@ -26,10 +26,11 @@ from config.store import ConfigStore
 
 # FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
 # and cap the socket timeout so a wrong/unreachable host fails fast instead of
-# hanging the test thread indefinitely. stimeout is in microseconds.
-os.environ.setdefault(
-    "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
-)
+# hanging the test thread indefinitely. stimeout is in microseconds. Set
+# immediately before the cv2.VideoCapture(...) call that needs it (not at
+# module level) — the FFmpeg backend reads this env var lazily, so setting it
+# at import time races against whichever module happens to import cv2 first.
+_RTSP_FFMPEG_OPTS = "rtsp_transport;tcp|stimeout;5000000"
 
 _PREVIEW_MAX_W = 380
 _PREVIEW_MAX_H = 150
@@ -251,11 +252,9 @@ class CameraScreen(ctk.CTkFrame):
         """Runs off the UI thread: open the stream and grab one frame."""
         cap = None
         try:
-            print(
-                f"[camera_screen] Opening RTSP stream with transport="
-                f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
-            )
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _RTSP_FFMPEG_OPTS
             cap = cv2.VideoCapture(connect_url, cv2.CAP_FFMPEG)
+            print(f"[camera_screen] Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
             if not cap.isOpened():
                 self._post_error(
                     "Could not open the stream. Check the URL is correct and "
