@@ -251,6 +251,10 @@ class CameraScreen(ctk.CTkFrame):
         """Runs off the UI thread: open the stream and grab one frame."""
         cap = None
         try:
+            print(
+                f"[camera_screen] Opening RTSP stream with transport="
+                f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
+            )
             cap = cv2.VideoCapture(connect_url, cv2.CAP_FFMPEG)
             if not cap.isOpened():
                 self._post_error(

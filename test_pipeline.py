@@ -22,6 +22,7 @@ there and report the console output.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from typing import Optional
@@ -31,6 +32,13 @@ import cv2
 from config.store import ConfigStore
 from service.detection import FaceDetector
 from service.recognition import FaceRecognizer
+
+# FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
+# and cap the socket timeout so a wrong/unreachable host fails fast instead of
+# hanging indefinitely. stimeout is in microseconds.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
+)
 
 # Default sampling rate — kept well below camera framerate (requirement: 2-5 fps,
 # configurable, not hardcoded into the pipeline). Overridable via --fps / config.
@@ -93,6 +101,10 @@ def _run_image(path, detector, recognizer, roi, sim_threshold) -> int:
 
 
 def _run_rtsp(url, detector, recognizer, roi, sim_threshold, fps, max_frames) -> int:
+    print(
+        f"Opening RTSP stream with transport="
+        f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
+    )
     cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
     if not cap.isOpened():
         print("✗ Could not open the RTSP stream.")

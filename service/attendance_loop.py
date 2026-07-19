@@ -17,12 +17,20 @@ here — review only, build/run on Windows.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import cv2
+
+# FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
+# and cap the socket timeout so a wrong/unreachable host fails fast instead of
+# hanging indefinitely. stimeout is in microseconds.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;5000000"
+)
 
 from config.store import ConfigStore
 from service.debounce import AttendanceDebounce
@@ -158,6 +166,10 @@ class AttendanceLoop:
         try:
             while self._running:
                 if cap is None:
+                    print(
+                        f"Opening RTSP stream with transport="
+                        f"{os.environ.get('OPENCV_FFMPEG_CAPTURE_OPTIONS', '<default>')}"
+                    )
                     cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
                     if not cap.isOpened():
                         print(f"✗ Could not open the RTSP stream; retrying in {backoff:.1f}s")
