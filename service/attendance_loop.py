@@ -130,6 +130,8 @@ class AttendanceLoop:
         gallery = load_local_gallery()
         if gallery:
             self._recognizer.load_gallery(gallery)
+            print(f"✓ Loaded {self._recognizer.gallery_size} embedding(s) into the "
+                  f"recognizer gallery from the local cache.")
         else:
             print("! Local gallery is empty — recognition will report no matches "
                   "until the sync-embeddings cache is populated.")
@@ -213,7 +215,10 @@ class AttendanceLoop:
                 print(f"! Recognition failed on a detected face ({exc}); skipping.")
                 continue
             if match is None:
+                print(f"· No match (best candidate below similarity threshold "
+                      f"{self._recognizer.similarity_threshold:.3f}).")
                 continue
+            print(f"✓ Match: student_id={match.student_id} similarity={match.confidence:.3f}")
             if not self._debounce.should_record(match.student_id):
                 continue
             self._enqueue_event(match.student_id, match.confidence)

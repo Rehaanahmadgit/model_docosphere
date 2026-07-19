@@ -12,10 +12,12 @@ The wizard flow:
 from __future__ import annotations
 
 import sys
+import threading
 
 import customtkinter as ctk
 
 from config.store import ConfigStore, get_machine_fingerprint
+from sync.embeddings_cache import refresh_gallery
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
@@ -108,13 +110,51 @@ class WizardApp(ctk.CTk):
 
     def _show_already_configured(self) -> None:
         self._clear()
+        wrap = ctk.CTkFrame(self._container, fg_color="transparent")
+        wrap.pack(expand=True)
+
         label = ctk.CTkLabel(
-            self._container,
+            wrap,
             text="Setup complete!\nThe agent will start on next launch.",
             font=ctk.CTkFont(size=18),
             justify="center",
         )
-        label.pack(expand=True)
+        label.pack(pady=(0, 16))
+
+        sync_btn = ctk.CTkButton(
+            wrap, text="Sync Now",
+            command=lambda: self._on_sync_now(sync_btn, status_label),
+        )
+        sync_btn.pack()
+
+        status_label = ctk.CTkLabel(wrap, text="", font=ctk.CTkFont(size=12))
+        status_label.pack(pady=(10, 0))
+
+        self._current_screen = wrap
+
+    def _on_sync_now(self, button: ctk.CTkButton, status_label: ctk.CTkLabel) -> None:
+        """
+        Manual trigger for GET /api/agent/sync-embeddings, for testing/refreshing
+        the local gallery without waiting for the next AttendanceLoop.start().
+        Runs the network call off the UI thread so the window doesn't freeze.
+        """
+        button.configure(state="disabled", text="Syncing…")
+        status_label.configure(text="")
+
+        def worker():
+            # refresh_gallery() never raises — on a sync failure it logs a
+            # warning and falls back to whatever's already cached, so this
+            # message reflects the cache's resulting state either way; check
+            # the console/log output for the fetch-vs-fallback distinction.
+            gallery = refresh_gallery()
+            message = f"✓ Local cache now has {len(gallery)} student(s)."
+            self.after(0, lambda: self._on_sync_done(button, status_label, message))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_sync_done(self, button: ctk.CTkButton, status_label: ctk.CTkLabel, message: str) -> None:
+        button.configure(state="normal", text="Sync Now")
+        status_label.configure(text=message)
 
     def _center(self) -> None:
         self.update_idletasks()

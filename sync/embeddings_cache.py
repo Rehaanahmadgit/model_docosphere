@@ -83,6 +83,14 @@ def refresh_gallery(cfg: Optional[dict] = None) -> dict:
               f"falling back to the local cache.")
         return read_cache()
 
+    print(f"→ Fetched {len(embeddings)} embedding(s) from the backend "
+          f"(GET /api/agent/sync-embeddings).")
+
     gallery = _write_cache(embeddings)
-    print(f"✓ Synced {len(gallery)} student embedding(s) from the backend.")
+    print(f"✓ Cached {len(gallery)} embedding(s) locally ({_cache_path()}).")
+
+    skipped = len(embeddings) - len(gallery)
+    if skipped > 0:
+        print(f"! Skipped {skipped} row(s) with a missing student_id/embedding.")
+
     return gallery
