@@ -28,15 +28,20 @@ import cv2
 from config.store import ConfigStore
 from service.debounce import AttendanceDebounce
 from service.detection import FaceDetector
+from service.logging_setup import get_logger
 from service.recognition import FaceRecognizer
 from service.snapshots import cleanup_old_snapshots, save_snapshot_if_needed
 from sync.embeddings_cache import read_cache as _read_embeddings_cache, refresh_gallery
 from sync.queue import EventQueue
 
+_logger = get_logger()
+
 _DEFAULT_SAMPLE_FPS = 3.0
 _DEFAULT_SESSION_WINDOW_HOURS = 4.0
-_RECONNECT_BACKOFF_START = 1.0
-_RECONNECT_BACKOFF_MAX = 30.0
+# Reconnect backoff sequence: wait 2s before the first retry, then 5s, 10s,
+# capped at 30s for every attempt after that — avoids hammering the
+# camera/network during a prolonged outage. Retries run indefinitely.
+_RECONNECT_BACKOFF_SEQUENCE = (2.0, 5.0, 10.0, 30.0)
 _SNAPSHOT_CLEANUP_INTERVAL_HOURS = 6.0
 
 # FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
@@ -124,6 +129,26 @@ class AttendanceLoop:
         self._thread: Optional[threading.Thread] = None
         self._running = False
 
+    # ── Dual console + file logging ─────────────────────────────────────────────
+    # Console print() output is unchanged (interactive debugging); these also
+    # write to the persistent per-day log file under app-data (service/logging_setup.py)
+    # for the unattended production agent, where console output isn't captured.
+
+    @staticmethod
+    def _log_info(msg: str) -> None:
+        print(msg)
+        _logger.info(msg)
+
+    @staticmethod
+    def _log_warning(msg: str) -> None:
+        print(msg)
+        _logger.warning(msg)
+
+    @staticmethod
+    def _log_error(msg: str) -> None:
+        print(msg)
+        _logger.error(msg)
+
     # ── Control interface (start/stop, for the scheduler to drive) ────────────────
 
     def start(self) -> None:
@@ -142,15 +167,20 @@ class AttendanceLoop:
         gallery = load_local_gallery()
         if gallery:
             self._recognizer.load_gallery(gallery)
-            print(f"✓ Loaded {self._recognizer.gallery_size} embedding(s) into the "
-                  f"recognizer gallery from the local cache.")
+            self._log_info(
+                f"✓ Loaded {self._recognizer.gallery_size} embedding(s) into the "
+                f"recognizer gallery from the local cache."
+            )
         else:
-            print("! Local gallery is empty — recognition will report no matches "
-                  "until the sync-embeddings cache is populated.")
+            self._log_warning(
+                "! Local gallery is empty — recognition will report no matches "
+                "until the sync-embeddings cache is populated."
+            )
 
         self._running = True
         self._thread = threading.Thread(target=self._run, name="AttendanceLoop", daemon=True)
         self._thread.start()
+        self._log_info(f"✓ Attendance loop started (camera_id={self.camera_id}).")
 
     def stop(self) -> None:
         """Signal the loop to stop and wait for the background thread to exit."""
@@ -158,40 +188,53 @@ class AttendanceLoop:
         if self._thread is not None:
             self._thread.join(timeout=10.0)
             self._thread = None
+        self._log_info("Attendance loop stopped.")
 
     # ── Loop internals ──────────────────────────────────────────────────────────
 
     def _run(self) -> None:
         interval = 1.0 / self._fps if self._fps > 0 else 0.0
-        backoff = _RECONNECT_BACKOFF_START
         cap = None
+        reconnecting = False
+        attempt = 0  # 0 = initial connect (no wait); >0 = Nth reconnect attempt
         next_due = 0.0
         next_snapshot_cleanup = time.monotonic() + _SNAPSHOT_CLEANUP_INTERVAL_HOURS * 3600
 
         try:
             while self._running:
                 if cap is None:
-                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _RTSP_FFMPEG_OPTS
-                    cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
-                    print(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
+                    if attempt > 0:
+                        wait = self._next_backoff(attempt - 1)
+                        self._log_warning(
+                            f"Reconnect attempt #{attempt} — retrying the RTSP stream "
+                            f"in {wait:.0f}s."
+                        )
+                        if not self._sleep(wait):
+                            break
+
+                    cap = self._open_capture()
                     if not cap.isOpened():
-                        print(f"✗ Could not open the RTSP stream; retrying in {backoff:.1f}s")
                         cap.release()
                         cap = None
-                        if not self._sleep(backoff):
-                            break
-                        backoff = min(backoff * 2, _RECONNECT_BACKOFF_MAX)
+                        attempt += 1
+                        reconnecting = True
+                        self._log_warning("✗ Could not open the RTSP stream.")
                         continue
-                    backoff = _RECONNECT_BACKOFF_START
+                    if reconnecting:
+                        self._log_info(
+                            f"✓ RTSP stream reconnected after {attempt} attempt(s); "
+                            f"resuming normal processing."
+                        )
+                    reconnecting = False
+                    attempt = 0
 
                 ok, frame = cap.read()
                 if not ok or frame is None:
-                    print(f"✗ Lost the RTSP stream; reconnecting in {backoff:.1f}s")
+                    self._log_warning("✗ Lost the RTSP stream; will attempt to reconnect.")
                     cap.release()
                     cap = None
-                    if not self._sleep(backoff):
-                        break
-                    backoff = min(backoff * 2, _RECONNECT_BACKOFF_MAX)
+                    reconnecting = True
+                    attempt = 1
                     continue
 
                 now = time.monotonic()
@@ -204,9 +247,24 @@ class AttendanceLoop:
                 next_due = now + interval
 
                 self._process_frame(frame)
+        except Exception:
+            self._log_error("✗ Unexpected exception in the attendance loop; loop is exiting.")
+            raise
         finally:
             if cap is not None:
                 cap.release()
+
+    def _open_capture(self):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _RTSP_FFMPEG_OPTS
+        cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
+        self._log_info(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
+        return cap
+
+    @staticmethod
+    def _next_backoff(attempt: int) -> float:
+        """Reconnect wait for the given 0-indexed attempt: 2s, 5s, 10s, then 30s forever."""
+        idx = min(attempt, len(_RECONNECT_BACKOFF_SEQUENCE) - 1)
+        return _RECONNECT_BACKOFF_SEQUENCE[idx]
 
     def _sleep(self, seconds: float) -> bool:
         """Sleep in small increments so stop() takes effect promptly during backoff.
@@ -224,20 +282,24 @@ class AttendanceLoop:
         try:
             faces = self._detector.detect(frame, self._roi)
         except Exception as exc:
-            print(f"! Detection failed on a frame ({exc}); skipping.")
+            self._log_error(f"! Detection failed on a frame ({exc}); skipping.")
             return
 
         for face in faces:
             try:
                 match = self._recognizer.identify(frame, face)
             except Exception as exc:
-                print(f"! Recognition failed on a detected face ({exc}); skipping.")
+                self._log_error(f"! Recognition failed on a detected face ({exc}); skipping.")
                 continue
             if match is None:
-                print(f"· No match (best candidate below similarity threshold "
-                      f"{self._recognizer.similarity_threshold:.3f}).")
+                self._log_info(
+                    f"· No match (best candidate below similarity threshold "
+                    f"{self._recognizer.similarity_threshold:.3f})."
+                )
                 continue
-            print(f"✓ Match: student_id={match.student_id} similarity={match.confidence:.3f}")
+            self._log_info(
+                f"✓ Match: student_id={match.student_id} similarity={match.confidence:.3f}"
+            )
             if not self._debounce.should_record(match.student_id):
                 continue
             self._save_snapshot(match.student_id, frame)
@@ -247,7 +309,7 @@ class AttendanceLoop:
         try:
             save_snapshot_if_needed(student_id, frame)
         except Exception as exc:
-            print(f"! Failed to save snapshot for student_id={student_id}: {exc}")
+            self._log_warning(f"! Failed to save snapshot for student_id={student_id}: {exc}")
 
     def _enqueue_event(self, student_id: str, confidence: float) -> None:
         try:
@@ -260,9 +322,13 @@ class AttendanceLoop:
                 camera_id=self.camera_id,
             )
         except Exception as exc:
-            print(f"✗ Failed to enqueue attendance event for student_id={student_id}: {exc}")
+            self._log_error(
+                f"✗ Failed to enqueue attendance event for student_id={student_id}: {exc}"
+            )
             return
-        print(f"✓ Queued attendance event: student_id={student_id} "
-              f"camera_id={self.camera_id} confidence={confidence:.3f}")
+        self._log_info(
+            f"✓ Queued attendance event: student_id={student_id} "
+            f"camera_id={self.camera_id} confidence={confidence:.3f}"
+        )
         if self.on_event is not None:
             self.on_event(student_id, confidence)
