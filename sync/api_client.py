@@ -115,6 +115,33 @@ def list_sections(
     _raise_for(resp)
 
 
+def get_schedule(
+    base_url: str,
+    token: str,
+    fingerprint: str,
+) -> dict:
+    """
+    GET /api/agent/schedule — the org-configured active-hours schedule for
+    this agent, as configured on the SaaS dashboard (Phase 2). Shape:
+
+        {"schedule": {"monday": {"enabled": true, "start": "08:00", "end": "15:00"}, ...}}
+
+    Keyed by lowercase weekday name; a day missing from the dict (or with
+    enabled=false) means recognition stays idle all day. Auth follows
+    sync_embeddings()'s pattern (token/fingerprint as query params) since
+    this is a read-only agent-facing GET like that endpoint.
+    """
+    resp = requests.get(
+        f"{base_url}/api/agent/schedule",
+        params={"token": token, "machine_fingerprint": fingerprint},
+        headers=_headers(token),
+        timeout=_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        return resp.json().get("schedule", {})
+    _raise_for(resp)
+
+
 def push_attendance(
     base_url: str,
     token: str,

@@ -17,7 +17,9 @@ import threading
 import customtkinter as ctk
 
 from config.store import ConfigStore, get_machine_fingerprint
+from scheduler import autostart
 from sync.embeddings_cache import refresh_gallery
+from sync.schedule_cache import refresh_schedule
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
@@ -130,7 +132,29 @@ class WizardApp(ctk.CTk):
         status_label = ctk.CTkLabel(wrap, text="", font=ctk.CTkFont(size=12))
         status_label.pack(pady=(10, 0))
 
+        autostart_var = ctk.BooleanVar(value=bool((ConfigStore().load() or {}).get("start_on_login", False)))
+        autostart_check = ctk.CTkCheckBox(
+            wrap,
+            text="Start automatically when Windows starts",
+            variable=autostart_var,
+            command=lambda: self._on_autostart_toggle(autostart_var.get()),
+        )
+        autostart_check.pack(pady=(20, 0))
+
         self._current_screen = wrap
+
+        # Startup sync: refresh embeddings + schedule in the background as
+        # soon as this screen loads, same as a manual "Sync Now" click.
+        self._on_sync_now(sync_btn, status_label)
+
+    @staticmethod
+    def _on_autostart_toggle(enabled: bool) -> None:
+        """Persist the preference and add/remove the HKCU Run key entry to match."""
+        if enabled:
+            autostart.enable()
+        else:
+            autostart.disable()
+        ConfigStore().update({"start_on_login": enabled})
 
     def _on_sync_now(self, button: ctk.CTkButton, status_label: ctk.CTkLabel) -> None:
         """
@@ -142,12 +166,17 @@ class WizardApp(ctk.CTk):
         status_label.configure(text="")
 
         def worker():
-            # refresh_gallery() never raises — on a sync failure it logs a
-            # warning and falls back to whatever's already cached, so this
-            # message reflects the cache's resulting state either way; check
-            # the console/log output for the fetch-vs-fallback distinction.
+            # refresh_gallery()/refresh_schedule() never raise — on a sync
+            # failure they log a warning and fall back to whatever's already
+            # cached, so this message reflects the cache's resulting state
+            # either way; check the console/log output for the
+            # fetch-vs-fallback distinction.
             gallery = refresh_gallery()
-            message = f"✓ Local cache now has {len(gallery)} student(s)."
+            schedule = refresh_schedule()
+            message = (
+                f"✓ Local cache now has {len(gallery)} student(s) "
+                f"and a schedule for {len(schedule)} day(s)."
+            )
             self.after(0, lambda: self._on_sync_done(button, status_label, message))
 
         threading.Thread(target=worker, daemon=True).start()

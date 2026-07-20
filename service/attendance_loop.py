@@ -33,6 +33,13 @@ from service.recognition import FaceRecognizer
 from service.snapshots import cleanup_old_snapshots, save_snapshot_if_needed
 from sync.embeddings_cache import read_cache as _read_embeddings_cache, refresh_gallery
 from sync.queue import EventQueue
+from sync.schedule_cache import (
+    cache_exists as _schedule_cache_exists,
+    is_active_now as _schedule_is_active_now,
+    next_window_start as _schedule_next_window_start,
+    read_cache as _read_schedule_cache,
+    refresh_schedule,
+)
 
 _logger = get_logger()
 
@@ -43,6 +50,10 @@ _DEFAULT_SESSION_WINDOW_HOURS = 4.0
 # camera/network during a prolonged outage. Retries run indefinitely.
 _RECONNECT_BACKOFF_SEQUENCE = (2.0, 5.0, 10.0, 30.0)
 _SNAPSHOT_CLEANUP_INTERVAL_HOURS = 6.0
+# How often the schedule cache is re-checked against the current day/time to
+# decide whether the camera/recognition loop should be running. Also the
+# idle sleep granularity while outside the active window.
+_SCHEDULE_CHECK_INTERVAL_SECONDS = 60.0
 
 # FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
 # and cap the socket timeout so a wrong/unreachable host fails fast instead of
@@ -161,9 +172,10 @@ class AttendanceLoop:
         self._detector.load()
         self._recognizer.load()
         cleanup_old_snapshots()
-        # Pull the latest embeddings at startup; falls back to whatever's
-        # already cached if the backend is unreachable (never raises).
+        # Pull the latest embeddings + schedule at startup; both fall back to
+        # whatever's already cached if the backend is unreachable (never raise).
         refresh_gallery()
+        refresh_schedule()
         gallery = load_local_gallery()
         if gallery:
             self._recognizer.load_gallery(gallery)
@@ -199,9 +211,42 @@ class AttendanceLoop:
         attempt = 0  # 0 = initial connect (no wait); >0 = Nth reconnect attempt
         next_due = 0.0
         next_snapshot_cleanup = time.monotonic() + _SNAPSHOT_CLEANUP_INTERVAL_HOURS * 3600
+        next_schedule_check = 0.0
+        schedule_state = None  # None | "not_synced" | "inactive" | "active"
 
         try:
             while self._running:
+                loop_now = time.monotonic()
+                if loop_now >= next_schedule_check:
+                    next_schedule_check = loop_now + _SCHEDULE_CHECK_INTERVAL_SECONDS
+                    new_state = self._current_schedule_state()
+                    if new_state != schedule_state:
+                        if schedule_state == "active" and cap is not None:
+                            self._log_info("Scheduled window ended, going idle")
+                            cap.release()
+                            cap = None
+                            reconnecting = False
+                            attempt = 0
+                        if new_state == "not_synced":
+                            self._log_warning(
+                                "No schedule configured yet — sync required before "
+                                "the agent will run recognition."
+                            )
+                        elif new_state == "inactive":
+                            next_start = _schedule_next_window_start(_read_schedule_cache())
+                            if next_start:
+                                self._log_info(f"Outside scheduled hours, idle until {next_start}.")
+                            else:
+                                self._log_info("Outside scheduled hours, idle.")
+                        elif new_state == "active":
+                            self._log_info("Entering scheduled active window")
+                        schedule_state = new_state
+
+                if schedule_state != "active":
+                    if not self._sleep(_SCHEDULE_CHECK_INTERVAL_SECONDS):
+                        break
+                    continue
+
                 if cap is None:
                     if attempt > 0:
                         wait = self._next_backoff(attempt - 1)
@@ -259,6 +304,16 @@ class AttendanceLoop:
         cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
         self._log_info(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
         return cap
+
+    @staticmethod
+    def _current_schedule_state() -> str:
+        """
+        "not_synced" if schedule_cache.json has never been written, else
+        "active"/"inactive" per is_active_now() against the cached schedule.
+        """
+        if not _schedule_cache_exists():
+            return "not_synced"
+        return "active" if _schedule_is_active_now(_read_schedule_cache()) else "inactive"
 
     @staticmethod
     def _next_backoff(attempt: int) -> float:
