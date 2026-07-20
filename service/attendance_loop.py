@@ -219,6 +219,7 @@ class AttendanceLoop:
         next_heartbeat = 0.0
         last_frame_at: Optional[datetime] = None
         schedule_state = None  # None | "not_synced" | "inactive" | "active"
+        frames_since_heartbeat = 0  # reset each time the heartbeat line is logged
 
         try:
             while self._running:
@@ -250,7 +251,8 @@ class AttendanceLoop:
 
                 if loop_now >= next_heartbeat:
                     next_heartbeat = loop_now + _HEARTBEAT_INTERVAL_SECONDS
-                    self._log_heartbeat(schedule_state, last_frame_at)
+                    self._log_heartbeat(schedule_state, last_frame_at, frames_since_heartbeat)
+                    frames_since_heartbeat = 0
 
                 if schedule_state != "active":
                     if not self._sleep(_SCHEDULE_CHECK_INTERVAL_SECONDS):
@@ -292,6 +294,14 @@ class AttendanceLoop:
                     attempt = 1
                     continue
 
+                # Update on every successfully captured raw frame, regardless
+                # of the sample-rate throttle below or whether a face is
+                # later found — otherwise a healthy stream with no visible
+                # face (or a fast camera relative to sample_fps) would still
+                # show a frozen "last frame processed at" in the heartbeat.
+                last_frame_at = datetime.now()
+                frames_since_heartbeat += 1
+
                 now = time.monotonic()
                 if now >= next_snapshot_cleanup:
                     cleanup_old_snapshots()
@@ -302,7 +312,6 @@ class AttendanceLoop:
                 next_due = now + interval
 
                 self._process_frame(frame)
-                last_frame_at = datetime.now()
         except Exception:
             self._log_error("✗ Unexpected exception in the attendance loop; loop is exiting.")
             raise
@@ -316,14 +325,21 @@ class AttendanceLoop:
         self._log_info(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
         return cap
 
-    def _log_heartbeat(self, schedule_state: Optional[str], last_frame_at: Optional[datetime]) -> None:
+    def _log_heartbeat(
+        self,
+        schedule_state: Optional[str],
+        last_frame_at: Optional[datetime],
+        frames_since_heartbeat: int,
+    ) -> None:
         """Single INFO line every _HEARTBEAT_INTERVAL_SECONDS so the log file's
         latest timestamp alone confirms the loop is alive, active or idle."""
         if schedule_state == "active":
             frame_str = last_frame_at.strftime("%H:%M:%S") if last_frame_at else "never"
+            minutes = _HEARTBEAT_INTERVAL_SECONDS / 60.0
             self._log_info(
-                f"Status: active — camera streaming, last frame processed at "
-                f"{frame_str}, {self._recognizer.gallery_size} students in local cache"
+                f"Status: active — camera streaming, {frames_since_heartbeat} frames "
+                f"read in last {minutes:.0f} min, last frame at {frame_str}, "
+                f"{self._recognizer.gallery_size} students in cache"
             )
         else:
             next_start = _schedule_next_window_start(_read_schedule_cache())
@@ -368,6 +384,10 @@ class AttendanceLoop:
             return
 
         for face in faces:
+            self._log_info(
+                f"Face detected (confidence={face.confidence:.2f}) — checking against "
+                f"{self._recognizer.gallery_size} cached embeddings"
+            )
             try:
                 match = self._recognizer.identify(frame, face)
             except Exception as exc:
@@ -389,9 +409,12 @@ class AttendanceLoop:
 
     def _save_snapshot(self, student_id: str, frame) -> None:
         try:
-            save_snapshot_if_needed(student_id, frame)
+            dest = save_snapshot_if_needed(student_id, frame)
         except Exception as exc:
             self._log_warning(f"! Failed to save snapshot for student_id={student_id}: {exc}")
+            return
+        if dest is not None:
+            self._log_info(f"Snapshot saved: snapshots/{dest.parent.name}/{dest.name}")
 
     def _enqueue_event(self, student_id: str, confidence: float) -> None:
         try:

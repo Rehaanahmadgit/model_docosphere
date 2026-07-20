@@ -10,8 +10,8 @@ hurts accuracy, so alignment is the default path.
 Identity is decided by cosine similarity against an in-memory gallery of student
 reference embeddings. For now the gallery is loaded from a simple local JSON file
 (``student_id -> embedding``); the real sync-embeddings API call is a separate
-step. A configurable threshold gates positive matches — SFace's own recommended
-cosine threshold for "same identity" is 0.363, which is the default here.
+step. A configurable threshold gates positive matches, defaulting to
+RECOGNITION_SIMILARITY_THRESHOLD below.
 
 Inference wiring only — no network, no config writes.
 """
@@ -28,8 +28,10 @@ import numpy as np
 if TYPE_CHECKING:
     from service.detection import DetectedFace
 
-# SFace's published cosine threshold for a same-identity match (OpenCV Zoo).
-_DEFAULT_SFACE_COSINE_THRESHOLD = 0.363
+# Minimum cosine similarity (0-1) to accept a gallery match. Also used for the
+# "no match" logging in attendance_loop.py's _process_frame so the reported
+# threshold always reflects what identify() actually gated on.
+RECOGNITION_SIMILARITY_THRESHOLD = 0.6
 
 
 @dataclass
@@ -60,7 +62,7 @@ class FaceRecognizer:
     def __init__(
         self,
         model_path: str,
-        similarity_threshold: float = _DEFAULT_SFACE_COSINE_THRESHOLD,
+        similarity_threshold: float = RECOGNITION_SIMILARITY_THRESHOLD,
         execution_provider: str = "cpu",
     ):
         self.model_path = model_path
