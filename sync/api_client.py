@@ -138,7 +138,12 @@ def get_schedule(
         timeout=_TIMEOUT,
     )
     if resp.status_code == 200:
-        return resp.json().get("schedule", {})
+        body = resp.json()
+        print(f"[debug] raw GET /api/agent/schedule response: {body!r}")
+        # Backend wraps the day-map under "schedule"; fall back to treating
+        # the body itself as the day-map if that key is absent, so this
+        # doesn't silently degrade to {} on a shape the client didn't expect.
+        return body.get("schedule", body) if isinstance(body, dict) else {}
     _raise_for(resp)
 
 

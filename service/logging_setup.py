@@ -24,7 +24,7 @@ from pathlib import Path
 # constant, deliberately separate from service/snapshots.py's
 # SNAPSHOT_RETENTION_DAYS — logs are much smaller and worth keeping longer
 # for debugging.
-LOG_RETENTION_DAYS = 14
+LOG_RETENTION_DAYS = 7
 
 _LOGGER_NAME = "attendance_agent"
 _DATE_FMT = "%Y-%m-%d"

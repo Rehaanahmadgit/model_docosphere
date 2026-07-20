@@ -54,6 +54,10 @@ _SNAPSHOT_CLEANUP_INTERVAL_HOURS = 6.0
 # decide whether the camera/recognition loop should be running. Also the
 # idle sleep granularity while outside the active window.
 _SCHEDULE_CHECK_INTERVAL_SECONDS = 60.0
+# How often a single status line is logged so the log file's latest
+# timestamp alone can confirm the loop is alive, even when nothing else
+# (no matches, no errors) has happened.
+_HEARTBEAT_INTERVAL_SECONDS = 300.0
 
 # FFMPEG capture options: force TCP transport (more reliable than UDP over WiFi)
 # and cap the socket timeout so a wrong/unreachable host fails fast instead of
@@ -212,6 +216,8 @@ class AttendanceLoop:
         next_due = 0.0
         next_snapshot_cleanup = time.monotonic() + _SNAPSHOT_CLEANUP_INTERVAL_HOURS * 3600
         next_schedule_check = 0.0
+        next_heartbeat = 0.0
+        last_frame_at: Optional[datetime] = None
         schedule_state = None  # None | "not_synced" | "inactive" | "active"
 
         try:
@@ -241,6 +247,10 @@ class AttendanceLoop:
                         elif new_state == "active":
                             self._log_info("Entering scheduled active window")
                         schedule_state = new_state
+
+                if loop_now >= next_heartbeat:
+                    next_heartbeat = loop_now + _HEARTBEAT_INTERVAL_SECONDS
+                    self._log_heartbeat(schedule_state, last_frame_at)
 
                 if schedule_state != "active":
                     if not self._sleep(_SCHEDULE_CHECK_INTERVAL_SECONDS):
@@ -292,6 +302,7 @@ class AttendanceLoop:
                 next_due = now + interval
 
                 self._process_frame(frame)
+                last_frame_at = datetime.now()
         except Exception:
             self._log_error("✗ Unexpected exception in the attendance loop; loop is exiting.")
             raise
@@ -304,6 +315,22 @@ class AttendanceLoop:
         cap = cv2.VideoCapture(self._rtsp_url, cv2.CAP_FFMPEG)
         self._log_info(f"Opened RTSP stream with transport={_RTSP_FFMPEG_OPTS}")
         return cap
+
+    def _log_heartbeat(self, schedule_state: Optional[str], last_frame_at: Optional[datetime]) -> None:
+        """Single INFO line every _HEARTBEAT_INTERVAL_SECONDS so the log file's
+        latest timestamp alone confirms the loop is alive, active or idle."""
+        if schedule_state == "active":
+            frame_str = last_frame_at.strftime("%H:%M:%S") if last_frame_at else "never"
+            self._log_info(
+                f"Status: active — camera streaming, last frame processed at "
+                f"{frame_str}, {self._recognizer.gallery_size} students in local cache"
+            )
+        else:
+            next_start = _schedule_next_window_start(_read_schedule_cache())
+            if next_start:
+                self._log_info(f"Status: idle — waiting for next window at {next_start}")
+            else:
+                self._log_info("Status: idle — no active window scheduled")
 
     @staticmethod
     def _current_schedule_state() -> str:

@@ -76,8 +76,9 @@ def refresh_schedule(cfg: Optional[dict] = None) -> dict:
               f"falling back to the local cache.")
         return read_cache()
 
-    print(f"→ Fetched schedule for {len(schedule)} day(s) from the backend "
-          f"(GET /api/agent/schedule).")
+    enabled_count = sum(1 for day in schedule.values() if day.get("enabled"))
+    print(f"→ Fetched schedule: {enabled_count} day(s) enabled "
+          f"(GET /api/agent/schedule, {len(schedule)} day(s) total).")
 
     cached = _write_cache(schedule)
     print(f"✓ Cached schedule for {len(cached)} day(s) locally ({_cache_path()}).")

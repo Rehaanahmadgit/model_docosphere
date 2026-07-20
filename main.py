@@ -18,6 +18,7 @@ import customtkinter as ctk
 
 from config.store import ConfigStore, get_machine_fingerprint
 from scheduler import autostart
+from sync.api_client import AGENT_VERSION
 from sync.embeddings_cache import refresh_gallery
 from sync.schedule_cache import refresh_schedule
 
@@ -173,9 +174,10 @@ class WizardApp(ctk.CTk):
             # fetch-vs-fallback distinction.
             gallery = refresh_gallery()
             schedule = refresh_schedule()
+            enabled_days = sum(1 for day in schedule.values() if day.get("enabled"))
             message = (
                 f"✓ Local cache now has {len(gallery)} student(s) "
-                f"and a schedule for {len(schedule)} day(s)."
+                f"and {enabled_days} enabled schedule day(s)."
             )
             self.after(0, lambda: self._on_sync_done(button, status_label, message))
 
@@ -258,6 +260,14 @@ class WizardApp(ctk.CTk):
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    # File logging must be up before anything else touches config/schedule/
+    # camera logic, so every run — successful or not — leaves a log behind.
+    try:
+        from service.logging_setup import get_logger
+        get_logger().info("Agent starting, version %s", AGENT_VERSION)
+    except Exception as exc:
+        print(f"! Failed to initialize file logging: {exc}")
+
     # WizardApp inspects the saved config and resumes at the correct step
     # (skipping token verification when a valid, machine-bound config exists).
     app = WizardApp()
